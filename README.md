@@ -84,3 +84,4 @@ field|type|operator|value
 ## License
 
 MIT
+# mongo-query-toolkit
