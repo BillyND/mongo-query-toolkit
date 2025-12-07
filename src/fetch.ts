@@ -1,5 +1,8 @@
 /**
  * @file Fetch utilities for MongoDB
+ * @description Hybrid approach: Uses optimal strategy based on query complexity
+ * - With filters: Single $facet query (efficient for filtered data)
+ * - Without filters: Parallel queries (faster for full collection scan)
  */
 
 import type { Model, PipelineStage } from "mongoose";
@@ -20,11 +23,14 @@ import {
 const { ObjectId } = mongoose.Types;
 
 // ============================================================================
-// Fetch List
+// Fetch List - HYBRID: Optimal strategy based on query complexity
 // ============================================================================
 
 /**
  * Fetch paginated list from MongoDB
+ * HYBRID APPROACH:
+ * - With filters → $facet (1 query, efficient for filtered data)
+ * - Without filters → 2 parallel queries (faster for full collection)
  *
  * @example
  * ```ts
@@ -42,7 +48,9 @@ export async function fetchList<T = Record<string, unknown>>(
   finalPipeline: PipelineStage[] = []
 ): Promise<FetchListResult<T>> {
   const url = getUrlFromRequest(request);
-  const { searchParams } = new URL(url);
+  const urlObj = new URL(url);
+  const searchParams = urlObj.searchParams;
+
   const {
     limit: maxLimit = 250,
     sortField = "updatedAt",
@@ -64,87 +72,164 @@ export async function fetchList<T = Record<string, unknown>>(
   const [sortBy, sortDirection] = sortParam?.split("|") || [];
 
   // Check flags
-  const isExporting = !!searchParams.get("export");
-  const countOnly = !!searchParams.get("countResultOnly");
+  const isExporting = searchParams.has("export");
+  const countOnly = searchParams.has("countResultOnly");
 
   // Build filter pipeline
   const filters = getFiltersFromUrl(url, tenantValue, tenantField);
   const filterPipeline = await buildPipelineWithPercent(filters, model);
 
-  const pipeline: PipelineStage[] = [...initialPipeline, ...filterPipeline];
+  // Check if we have filters (determines which strategy to use)
+  const hasFilters = filterPipeline.length > 0 || initialPipeline.length > 0;
 
-  // Get total
-  const total =
-    (await model.aggregate([...pipeline, { $count: "total" }]).exec())?.[0]
-      ?.total || 0;
+  // Build base pipeline
+  const pipeline: PipelineStage[] = [];
+  for (let i = 0; i < initialPipeline.length; i++) {
+    pipeline.push(initialPipeline[i]);
+  }
+  for (let i = 0; i < filterPipeline.length; i++) {
+    pipeline.push(filterPipeline[i]);
+  }
 
-  // Calculate pagination info
-  const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
-  const hasNextPage = page < totalPages;
-  const hasPrevPage = page > 1;
-  const nextPage = hasNextPage ? page + 1 : null;
-  const prevPage = hasPrevPage ? page - 1 : null;
+  // Determine sort
+  let sortStage: PipelineStage | null = null;
+  let hasSortStage = false;
+  for (let i = 0; i < pipeline.length; i++) {
+    if ("$sort" in pipeline[i]) {
+      hasSortStage = true;
+      break;
+    }
+  }
 
+  if (!hasSortStage) {
+    const field = sortBy || sortField;
+    const dir =
+      sortDirection === "asc"
+        ? 1
+        : sortDirection === "desc"
+        ? -1
+        : sortDir === "asc"
+        ? 1
+        : -1;
+    sortStage = { $sort: { [field]: dir } };
+  }
+
+  // Count only mode - single count query
   if (countOnly) {
+    let total: number;
+
+    if (hasFilters) {
+      const countResult = await model
+        .aggregate([...pipeline, { $count: "total" }])
+        .allowDiskUse(true)
+        .exec();
+      total = countResult[0]?.total || 0;
+    } else {
+      // No filters - use fast estimatedDocumentCount
+      total = await model.estimatedDocumentCount().exec();
+    }
+
+    const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+
     return {
       page,
       limit,
       total,
       totalPages,
-      hasNextPage,
-      hasPrevPage,
-      nextPage,
-      prevPage,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      nextPage: page < totalPages ? page + 1 : null,
+      prevPage: page > 1 ? page - 1 : null,
       items: [],
     };
   }
 
-  // Add sort
-  const hasSortStage = pipeline.some((s) => "$sort" in s);
-  if (!hasSortStage) {
-    const field = sortBy || sortField;
-    const dir =
-      sortDirection?.toLowerCase() === "asc"
-        ? 1
-        : sortDirection?.toLowerCase() === "desc"
-        ? -1
-        : sortDir === "asc"
-        ? 1
-        : -1;
-    pipeline.push({ $sort: { [field]: dir } });
+  // ========================================================================
+  // HYBRID STRATEGY: Choose optimal approach based on filters
+  // ========================================================================
+
+  if (hasFilters) {
+    // WITH FILTERS: Use $facet (1 query) - efficient for filtered data
+    const itemsPipeline: PipelineStage[] = [];
+    if (sortStage) itemsPipeline.push(sortStage);
+    for (let i = 0; i < finalPipeline.length; i++) {
+      itemsPipeline.push(finalPipeline[i]);
+    }
+    if (!isExporting && limit > 0) {
+      itemsPipeline.push({ $skip: skip }, { $limit: limit });
+    }
+
+    const facetStage = {
+      $facet: {
+        metadata: [{ $count: "total" }],
+        items: itemsPipeline,
+      },
+    } as PipelineStage;
+
+    pipeline.push(facetStage);
+
+    const facetResult = await model
+      .aggregate(pipeline)
+      .allowDiskUse(true)
+      .exec();
+
+    const result = facetResult[0];
+    const total = result?.metadata[0]?.total || 0;
+    const items = (result?.items || []) as T[];
+
+    const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+
+    return {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      nextPage: page < totalPages ? page + 1 : null,
+      prevPage: page > 1 ? page - 1 : null,
+      items,
+    };
+  } else {
+    // NO FILTERS: Use 2 parallel queries - faster for full collection scan
+    const itemsPipeline: PipelineStage[] = [...pipeline];
+    if (sortStage) itemsPipeline.push(sortStage);
+    for (let i = 0; i < finalPipeline.length; i++) {
+      itemsPipeline.push(finalPipeline[i]);
+    }
+    if (!isExporting && limit > 0) {
+      itemsPipeline.push({ $skip: skip }, { $limit: limit });
+    }
+
+    // Run count and items in parallel
+    const [total, items] = await Promise.all([
+      model.estimatedDocumentCount().exec(),
+      model.aggregate(itemsPipeline).allowDiskUse(true).exec() as Promise<T[]>,
+    ]);
+
+    const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+
+    return {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      nextPage: page < totalPages ? page + 1 : null,
+      prevPage: page > 1 ? page - 1 : null,
+      items,
+    };
   }
-
-  // Add final pipeline
-  if (finalPipeline.length) {
-    pipeline.push(...finalPipeline);
-  }
-
-  // Add pagination
-  if (!isExporting && limit > 0) {
-    pipeline.push({ $skip: skip }, { $limit: limit });
-  }
-
-  const items = (await model.aggregate(pipeline).exec()) as T[];
-
-  return {
-    page,
-    limit,
-    total,
-    totalPages,
-    hasNextPage,
-    hasPrevPage,
-    nextPage,
-    prevPage,
-    items,
-  };
 }
 
 // ============================================================================
-// Fetch Unified List (Multi-Model)
+// Fetch Unified List (Multi-Model) - HYBRID
 // ============================================================================
 
 /**
  * Fetch from multiple models using $unionWith
+ * Always uses $facet since $unionWith requires aggregation
  */
 export async function fetchUnifiedList<T = Record<string, unknown>>(
   request: RequestInput,
@@ -166,7 +251,9 @@ export async function fetchUnifiedList<T = Record<string, unknown>>(
   }
 
   const url = getUrlFromRequest(request);
-  const { searchParams } = new URL(url);
+  const urlObj = new URL(url);
+  const searchParams = urlObj.searchParams;
+
   const {
     limit: maxLimit = 250,
     sortField = "updatedAt",
@@ -183,109 +270,152 @@ export async function fetchUnifiedList<T = Record<string, unknown>>(
   const skip = (page - 1) * limit;
   const sortParam = searchParams.get("sort");
   const [sortBy, sortDirection] = sortParam?.split("|") || [];
-  const isExporting = !!searchParams.get("export");
-  const countOnly = !!searchParams.get("countResultOnly");
+  const isExporting = searchParams.has("export");
+  const countOnly = searchParams.has("countResultOnly");
 
   const [baseModel, ...otherModels] = models;
   const filters = getFiltersFromUrl(url, tenantValue, tenantField ?? "");
   const filterPipeline = buildPipeline(filters);
 
   // Build base pipeline
-  const pipeline: PipelineStage[] = [
-    ...(baseModel.initialPipeline || []),
-    ...filterPipeline,
-    { $addFields: { _sourceType: baseModel.model.collection.name } },
-  ];
+  const pipeline: PipelineStage[] = [];
+
+  const baseInitial = baseModel.initialPipeline;
+  if (baseInitial) {
+    for (let i = 0; i < baseInitial.length; i++) {
+      pipeline.push(baseInitial[i]);
+    }
+  }
+
+  for (let i = 0; i < filterPipeline.length; i++) {
+    pipeline.push(filterPipeline[i]);
+  }
+
+  pipeline.push({
+    $addFields: { _sourceType: baseModel.model.collection.name },
+  });
 
   // Add $unionWith for other models
-  for (const cfg of otherModels) {
-    const unionPipeline: PipelineStage[] = [
-      ...(cfg.initialPipeline || []),
-      ...filterPipeline,
-      { $addFields: { _sourceType: cfg.model.collection.name } },
-      ...(cfg.finalPipeline || []),
-    ];
+  for (let i = 0; i < otherModels.length; i++) {
+    const cfg = otherModels[i];
+    const unionPipeline: PipelineStage[] = [];
+
+    const cfgInitial = cfg.initialPipeline;
+    if (cfgInitial) {
+      for (let j = 0; j < cfgInitial.length; j++) {
+        unionPipeline.push(cfgInitial[j]);
+      }
+    }
+
+    for (let j = 0; j < filterPipeline.length; j++) {
+      unionPipeline.push(filterPipeline[j]);
+    }
+
+    unionPipeline.push({
+      $addFields: { _sourceType: cfg.model.collection.name },
+    });
+
+    const cfgFinal = cfg.finalPipeline;
+    if (cfgFinal) {
+      for (let j = 0; j < cfgFinal.length; j++) {
+        unionPipeline.push(cfgFinal[j]);
+      }
+    }
+
     pipeline.push({
       $unionWith: { coll: cfg.model.collection.name, pipeline: unionPipeline },
     } as PipelineStage);
   }
 
-  if (baseModel.finalPipeline?.length) {
-    pipeline.push(...baseModel.finalPipeline);
+  const baseFinal = baseModel.finalPipeline;
+  if (baseFinal) {
+    for (let i = 0; i < baseFinal.length; i++) {
+      pipeline.push(baseFinal[i]);
+    }
   }
 
-  // Get total
-  const total =
-    (
-      await baseModel.model.aggregate([...pipeline, { $count: "total" }]).exec()
-    )?.[0]?.total || 0;
+  // Determine sort
+  const field = sortBy || sortField;
+  const dir =
+    sortDirection === "asc"
+      ? 1
+      : sortDirection === "desc"
+      ? -1
+      : sortDir === "asc"
+      ? 1
+      : -1;
+  const sortStage: PipelineStage = { $sort: { [field]: dir } };
 
-  // Calculate pagination info
-  const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
-  const hasNextPage = page < totalPages;
-  const hasPrevPage = page > 1;
-  const nextPage = hasNextPage ? page + 1 : null;
-  const prevPage = hasPrevPage ? page - 1 : null;
-
+  // Count only mode
   if (countOnly) {
+    const countResult = await baseModel.model
+      .aggregate([...pipeline, { $count: "total" }])
+      .allowDiskUse(true)
+      .exec();
+
+    const total = countResult[0]?.total || 0;
+    const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+
     return {
       page,
       limit,
       total,
       totalPages,
-      hasNextPage,
-      hasPrevPage,
-      nextPage,
-      prevPage,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      nextPage: page < totalPages ? page + 1 : null,
+      prevPage: page > 1 ? page - 1 : null,
       items: [],
     };
   }
 
-  // Add sort
-  const field = sortBy || sortField;
-  const dir =
-    sortDirection?.toLowerCase() === "asc"
-      ? 1
-      : sortDirection?.toLowerCase() === "desc"
-      ? -1
-      : sortDir === "asc"
-      ? 1
-      : -1;
-  pipeline.push({ $sort: { [field]: dir } });
-
-  // Add pagination
+  // Build items pipeline
+  const itemsPipeline: PipelineStage[] = [sortStage];
   if (!isExporting && limit > 0) {
-    pipeline.push({ $skip: skip }, { $limit: limit });
+    itemsPipeline.push({ $skip: skip }, { $limit: limit });
   }
 
-  const items = (await baseModel.model.aggregate(pipeline).exec()) as T[];
+  // Use $facet for unified list (required due to $unionWith)
+  const facetStage = {
+    $facet: {
+      metadata: [{ $count: "total" }],
+      items: itemsPipeline,
+    },
+  } as PipelineStage;
+
+  pipeline.push(facetStage);
+
+  const facetResult = await baseModel.model
+    .aggregate(pipeline)
+    .allowDiskUse(true)
+    .exec();
+
+  const result = facetResult[0];
+  const total = result?.metadata[0]?.total || 0;
+  const items = (result?.items || []) as T[];
+
+  const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
 
   return {
     page,
     limit,
     total,
     totalPages,
-    hasNextPage,
-    hasPrevPage,
-    nextPage,
-    prevPage,
+    hasNextPage: page < totalPages,
+    hasPrevPage: page > 1,
+    nextPage: page < totalPages ? page + 1 : null,
+    prevPage: page > 1 ? page - 1 : null,
     items,
   };
 }
 
 // ============================================================================
-// Fetch Item
+// Fetch Item - OPTIMIZED
 // ============================================================================
 
 /**
  * Fetch single item by ID
- *
- * @example
- * ```ts
- * const item = await fetchItem(request, MyModel);
- * // or with explicit ID
- * const item = await fetchItem(request, MyModel, [], [], "123");
- * ```
+ * OPTIMIZED: Early return, simplified ID matching
  */
 export async function fetchItem<T = Record<string, unknown>>(
   request: RequestInput,
@@ -294,34 +424,51 @@ export async function fetchItem<T = Record<string, unknown>>(
   finalPipeline: PipelineStage[] = [],
   id?: string | number
 ): Promise<T | null> {
-  // Get ID from URL or param
-  if (!id) {
+  let idStr: string | undefined;
+
+  if (id !== undefined) {
+    idStr = String(id);
+  } else {
     const url = getUrlFromRequest(request);
-    const { searchParams } = new URL(url);
-    id = searchParams.get("id") ?? undefined;
+    const urlObj = new URL(url);
+    idStr = urlObj.searchParams.get("id") ?? undefined;
   }
 
-  if (!id) return null;
+  if (!idStr) return null;
 
-  const idStr = String(id);
+  // Build $or conditions for ID matching
+  const idConditions: Record<string, unknown>[] = [{ id: idStr }];
 
-  const pipeline: PipelineStage[] = [
-    ...initialPipeline,
-    {
-      $match: {
-        $or: [
-          { id: idStr },
-          { id: Number(idStr) },
-          { _id: ObjectId.isValid(idStr) ? new ObjectId(idStr) : idStr },
-        ],
-      },
-    },
-    ...finalPipeline,
-    { $limit: 1 },
-  ];
+  const numId = Number(idStr);
+  if (!Number.isNaN(numId)) {
+    idConditions.push({ id: numId });
+  }
+
+  if (ObjectId.isValid(idStr)) {
+    idConditions.push({ _id: new ObjectId(idStr) });
+  }
+
+  // Build pipeline efficiently
+  const pipeline: PipelineStage[] = [];
+
+  for (let i = 0; i < initialPipeline.length; i++) {
+    pipeline.push(initialPipeline[i]);
+  }
+
+  if (idConditions.length === 1) {
+    pipeline.push({ $match: idConditions[0] });
+  } else {
+    pipeline.push({ $match: { $or: idConditions } });
+  }
+
+  for (let i = 0; i < finalPipeline.length; i++) {
+    pipeline.push(finalPipeline[i]);
+  }
+
+  pipeline.push({ $limit: 1 });
 
   const result = await model.aggregate(pipeline).exec();
-  return (result?.[0] as T) ?? null;
+  return (result[0] as T) ?? null;
 }
 
 /**
@@ -333,8 +480,14 @@ export async function fetchItemBy<T = Record<string, unknown>>(
   value: unknown,
   pipeline: PipelineStage[] = []
 ): Promise<T | null> {
-  const result = await model
-    .aggregate([...pipeline, { $match: { [field]: value } }, { $limit: 1 }])
-    .exec();
-  return (result?.[0] as T) ?? null;
+  const fullPipeline: PipelineStage[] = [];
+
+  for (let i = 0; i < pipeline.length; i++) {
+    fullPipeline.push(pipeline[i]);
+  }
+
+  fullPipeline.push({ $match: { [field]: value } }, { $limit: 1 });
+
+  const result = await model.aggregate(fullPipeline).exec();
+  return (result[0] as T) ?? null;
 }

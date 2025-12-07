@@ -286,6 +286,38 @@ When using short format, the library auto-detects type and operator based on the
 | `before` | Before Date  | date                  | `createdAt\|date\|before\|2024-01-01` | `{ createdAt: { $lt: Date } }`       |
 | `after`  | After Date   | date                  | `createdAt\|date\|after\|2024-01-01`  | `{ createdAt: { $gt: Date } }`       |
 
+### Percentage-Based Results
+
+You can limit results to a **percentage** of the filtered data by adding a 5th parameter:
+
+**Format:** `field|type|operator|value|percentOfResult`
+
+| Value | Behavior                     | Example (100 records total) |
+| ----- | ---------------------------- | --------------------------- |
+| `10`  | Get **first 10%** of results | Returns first 10 records    |
+| `-10` | Get **last 10%** of results  | Skips 90, returns last 10   |
+
+**Examples:**
+
+```
+# Get top 10% of products with price > 0
+?filter=price|amount|gt|0|10
+
+# Get bottom 20% of users by score
+?filter=score|amount|gt|0|-20
+
+# Get first 5% of active orders
+?filter=status|string|eq|active|5
+```
+
+**Use Cases:**
+
+- **Top performers:** Get top 10% highest-value customers
+- **Bottom analysis:** Identify bottom 20% lowest-performing products
+- **Sampling:** Quick preview of a percentage of large datasets
+
+> **Note:** Percentage is calculated AFTER filters are applied. If filter returns 1000 items and you use `|10`, you get 100 items.
+
 ---
 
 ## Pipeline Customization
