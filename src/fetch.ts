@@ -78,8 +78,25 @@ export async function fetchList<T = Record<string, unknown>>(
     (await model.aggregate([...pipeline, { $count: "total" }]).exec())?.[0]
       ?.total || 0;
 
+  // Calculate pagination info
+  const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+  const hasNextPage = page < totalPages;
+  const hasPrevPage = page > 1;
+  const nextPage = hasNextPage ? page + 1 : null;
+  const prevPage = hasPrevPage ? page - 1 : null;
+
   if (countOnly) {
-    return { page, total, items: [] };
+    return {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage,
+      hasPrevPage,
+      nextPage,
+      prevPage,
+      items: [],
+    };
   }
 
   // Add sort
@@ -109,7 +126,17 @@ export async function fetchList<T = Record<string, unknown>>(
 
   const items = (await model.aggregate(pipeline).exec()) as T[];
 
-  return { page, total, items };
+  return {
+    page,
+    limit,
+    total,
+    totalPages,
+    hasNextPage,
+    hasPrevPage,
+    nextPage,
+    prevPage,
+    items,
+  };
 }
 
 // ============================================================================
@@ -124,7 +151,19 @@ export async function fetchUnifiedList<T = Record<string, unknown>>(
   models: MultiModelConfig[],
   options: FetchOptions = {}
 ): Promise<FetchListResult<T>> {
-  if (!models.length) return { page: 1, total: 0, items: [] };
+  if (!models.length) {
+    return {
+      page: 1,
+      limit: 0,
+      total: 0,
+      totalPages: 0,
+      hasNextPage: false,
+      hasPrevPage: false,
+      nextPage: null,
+      prevPage: null,
+      items: [],
+    };
+  }
 
   const url = getUrlFromRequest(request);
   const { searchParams } = new URL(url);
@@ -181,7 +220,26 @@ export async function fetchUnifiedList<T = Record<string, unknown>>(
       await baseModel.model.aggregate([...pipeline, { $count: "total" }]).exec()
     )?.[0]?.total || 0;
 
-  if (countOnly) return { page, total, items: [] };
+  // Calculate pagination info
+  const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+  const hasNextPage = page < totalPages;
+  const hasPrevPage = page > 1;
+  const nextPage = hasNextPage ? page + 1 : null;
+  const prevPage = hasPrevPage ? page - 1 : null;
+
+  if (countOnly) {
+    return {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage,
+      hasPrevPage,
+      nextPage,
+      prevPage,
+      items: [],
+    };
+  }
 
   // Add sort
   const field = sortBy || sortField;
@@ -201,7 +259,18 @@ export async function fetchUnifiedList<T = Record<string, unknown>>(
   }
 
   const items = (await baseModel.model.aggregate(pipeline).exec()) as T[];
-  return { page, total, items };
+
+  return {
+    page,
+    limit,
+    total,
+    totalPages,
+    hasNextPage,
+    hasPrevPage,
+    nextPage,
+    prevPage,
+    items,
+  };
 }
 
 // ============================================================================

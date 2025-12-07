@@ -2,33 +2,32 @@
  * @file MongoDB Query Toolkit
  *
  * Simple, reusable utilities for MongoDB aggregation queries.
+ * Works on both server (Node.js) and client (browser).
  *
- * @example Basic Usage
+ * @example Server-Side (Remix, Next.js, Express)
  * ```ts
  * import { fetchList, fetchItem } from "mongo-query-toolkit";
  *
- * // Fetch list with pagination & filtering (accepts Request or URL string)
- * const result = await fetchList(request, MyModel, {
- *   tenantValue: shopDomain,
- *   limit: 50,
- * });
+ * // Fetch list with pagination & filtering
+ * const result = await fetchList(request, MyModel, { limit: 50 });
  *
  * // Fetch single item
  * const item = await fetchItem(request, MyModel);
  * ```
  *
- * @example Filter Parsing
+ * @example Client-Side (React, Vue, etc.)
  * ```ts
- * import { parseFilter, buildPipeline, getFiltersFromUrl } from "mongo-query-toolkit";
+ * import { buildQueryUrl } from "mongo-query-toolkit";
  *
- * // Parse filter string
- * const filter = parseFilter("status|string|eq|active");
+ * // Build URL with filters
+ * const url = buildQueryUrl("/api/products", {
+ *   page: 1,
+ *   limit: 20,
+ *   filters: ["status|active", "price|amount|gt|100"],
+ * });
  *
- * // Get filters from Request or URL
- * const filters = getFiltersFromUrl(request, shopDomain);
- *
- * // Build MongoDB pipeline
- * const pipeline = buildPipeline(filters);
+ * // Fetch data
+ * const response = await fetch(url);
  * ```
  */
 
@@ -42,9 +41,10 @@ export type {
   FetchListResult,
   FetchOptions,
   MultiModelConfig,
+  QueryUrlOptions,
 } from "./types.js";
 
-// Filter utilities
+// Filter & URL utilities (works on both client and server)
 export {
   getUrlFromRequest,
   parseFilter,
@@ -52,7 +52,13 @@ export {
   buildPipeline,
   buildPipelineWithPercent,
   getFiltersFromUrl,
+  buildQueryUrl,
 } from "./filter.js";
 
-// Fetch utilities
-export { fetchList, fetchUnifiedList, fetchItem, fetchItemBy } from "./fetch.js";
+// Fetch utilities (server-side only, requires mongoose)
+export {
+  fetchList,
+  fetchUnifiedList,
+  fetchItem,
+  fetchItemBy,
+} from "./fetch.js";

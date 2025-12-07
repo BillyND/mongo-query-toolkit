@@ -9,6 +9,7 @@ import type {
   FilterType,
   BetweenOperatorValue,
   RequestInput,
+  QueryUrlOptions,
 } from "./types.js";
 
 const { ObjectId } = mongoose.Types;
@@ -358,4 +359,41 @@ export function getFiltersFromUrl(
   }
 
   return filters;
+}
+
+// ============================================================================
+// Client-Side URL Builder
+// ============================================================================
+
+/**
+ * Build a query URL with filters, pagination, and sorting.
+ * Works in both browser and Node.js environments.
+ *
+ * @example
+ * ```ts
+ * const url = buildQueryUrl("/api/products", {
+ *   page: 1,
+ *   limit: 20,
+ *   sort: "price|desc",
+ *   filters: ["status|string|eq|active", "price|amount|gt|100"],
+ * });
+ * // => "/api/products?page=1&limit=20&sort=price|desc&filter=status|string|eq|active&filter=price|amount|gt|100"
+ * ```
+ */
+export function buildQueryUrl(
+  baseUrl: string,
+  options: QueryUrlOptions = {}
+): string {
+  const params = new URLSearchParams();
+
+  if (options.page) params.set("page", String(options.page));
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.sort) params.set("sort", options.sort);
+  if (options.id) params.set("id", options.id);
+  if (options.export) params.set("export", "true");
+  if (options.countOnly) params.set("countResultOnly", "true");
+  options.filters?.forEach((f) => params.append("filter", f));
+
+  const queryString = params.toString();
+  return queryString ? `${baseUrl}?${queryString}` : baseUrl;
 }

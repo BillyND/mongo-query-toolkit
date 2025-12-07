@@ -406,28 +406,13 @@ const result = await fetchList(
 
 ## Client-Side Usage
 
-### Building Filter URLs
+### `buildQueryUrl(baseUrl, options)`
+
+Build a query URL with filters, pagination, and sorting. **Works in both browser and Node.js.**
 
 ```typescript
-// Helper function
-function buildQueryUrl(
-  baseUrl: string,
-  options: {
-    page?: number;
-    limit?: number;
-    sort?: string;
-    filters?: string[];
-  }
-) {
-  const params = new URLSearchParams();
-  if (options.page) params.set("page", String(options.page));
-  if (options.limit) params.set("limit", String(options.limit));
-  if (options.sort) params.set("sort", options.sort);
-  options.filters?.forEach((f) => params.append("filter", f));
-  return `${baseUrl}?${params.toString()}`;
-}
+import { buildQueryUrl } from "mongo-query-toolkit";
 
-// Usage
 const url = buildQueryUrl("/api/products", {
   page: 1,
   limit: 20,
@@ -438,23 +423,39 @@ const url = buildQueryUrl("/api/products", {
     "category|array|any|electronics,books",
   ],
 });
+// => "/api/products?page=1&limit=20&sort=price|desc&filter=status|string|eq|active&filter=..."
 ```
+
+**Options:**
+
+| Option      | Type       | Description                             |
+| ----------- | ---------- | --------------------------------------- |
+| `page`      | `number`   | Page number                             |
+| `limit`     | `number`   | Items per page                          |
+| `sort`      | `string`   | Sort: `"field\|asc"` or `"field\|desc"` |
+| `filters`   | `string[]` | Array of filter strings                 |
+| `id`        | `string`   | Item ID (for fetchItem)                 |
+| `export`    | `boolean`  | Skip pagination                         |
+| `countOnly` | `boolean`  | Return only count                       |
 
 ### React Example
 
 ```tsx
+import { buildQueryUrl } from "mongo-query-toolkit";
+
 function ProductList() {
   const [products, setProducts] = useState([]);
   const [filters, setFilters] = useState<string[]>([]);
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    params.set("page", String(page));
-    params.set("limit", "20");
-    filters.forEach((f) => params.append("filter", f));
+    const url = buildQueryUrl("/api/products", {
+      page,
+      limit: 20,
+      filters,
+    });
 
-    fetch(`/api/products?${params}`)
+    fetch(url)
       .then((res) => res.json())
       .then((data) => setProducts(data.items));
   }, [page, filters]);
@@ -516,21 +517,47 @@ export default function Products() {
 
 ```typescript
 interface FetchListResult<T> {
-  page: number;   // Current page number (1-indexed)
-  total: number;  // Total matching documents (before pagination)
-  items: T[];     // Array of documents for current page
+  page: number; // Current page number (1-indexed)
+  limit: number; // Items per page
+  total: number; // Total matching documents
+  totalPages: number; // Total number of pages
+  hasNextPage: boolean; // Whether there is a next page
+  hasPrevPage: boolean; // Whether there is a previous page
+  nextPage: number | null; // Next page number (null if none)
+  prevPage: number | null; // Previous page number (null if none)
+  items: T[]; // Array of documents for current page
 }
+```
 
-// Example response
+**Example Response:**
+
+```json
 {
-  page: 2,
-  total: 150,
-  items: [
-    { _id: "...", name: "Product 1", ... },
-    { _id: "...", name: "Product 2", ... },
-    // ... up to `limit` items
+  "page": 2,
+  "limit": 20,
+  "total": 150,
+  "totalPages": 8,
+  "hasNextPage": true,
+  "hasPrevPage": true,
+  "nextPage": 3,
+  "prevPage": 1,
+  "items": [
+    { "_id": "...", "name": "Product 1" },
+    { "_id": "...", "name": "Product 2" }
   ]
 }
+```
+
+**Pagination Helpers for Client:**
+
+```typescript
+// Easy to build pagination UI
+const { page, totalPages, hasNextPage, hasPrevPage, nextPage, prevPage } = result;
+
+// Example: Pagination component
+<button disabled={!hasPrevPage} onClick={() => goToPage(prevPage)}>Prev</button>
+<span>Page {page} of {totalPages}</span>
+<button disabled={!hasNextPage} onClick={() => goToPage(nextPage)}>Next</button>
 ```
 
 ### fetchItem / fetchItemBy
