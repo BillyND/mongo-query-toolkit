@@ -7,14 +7,14 @@
  * ```ts
  * import { fetchList, fetchItem } from "mongo-query-toolkit";
  *
- * // Fetch list with pagination & filtering
- * const result = await fetchList(request.url, MyModel, {
+ * // Fetch list with pagination & filtering (accepts Request or URL string)
+ * const result = await fetchList(request, MyModel, {
  *   tenantValue: shopDomain,
  *   limit: 50,
  * });
  *
  * // Fetch single item
- * const item = await fetchItem(request.url, MyModel);
+ * const item = await fetchItem(request, MyModel);
  * ```
  *
  * @example Filter Parsing
@@ -24,8 +24,8 @@
  * // Parse filter string
  * const filter = parseFilter("status|string|eq|active");
  *
- * // Get filters from URL
- * const filters = getFiltersFromUrl(request.url, shopDomain);
+ * // Get filters from Request or URL
+ * const filters = getFiltersFromUrl(request, shopDomain);
  *
  * // Build MongoDB pipeline
  * const pipeline = buildPipeline(filters);
@@ -34,6 +34,7 @@
 
 // Types
 export type {
+  RequestInput,
   FilterType,
   FilterOperator,
   FilterValue,
@@ -45,6 +46,7 @@ export type {
 
 // Filter utilities
 export {
+  getUrlFromRequest,
   parseFilter,
   parseFilters,
   buildPipeline,

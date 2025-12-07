@@ -1,6 +1,6 @@
 {
   "name": "mongo-query-toolkit",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Simple MongoDB aggregation utilities with filtering and pagination",
   "author": "Peakify",
   "license": "MIT",

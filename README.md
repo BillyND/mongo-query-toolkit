@@ -17,11 +17,17 @@ yarn add mongo-query-toolkit
 ```typescript
 import { fetchList } from "mongo-query-toolkit";
 
-const result = await fetchList(request.url, MyModel, {
+// Pass Request object directly (Remix, Next.js, Hono, etc.)
+const result = await fetchList(request, MyModel, {
   tenantValue: shopDomain, // Optional: filter by tenant
   limit: 50, // Optional: default 250
 });
 // => { page: 1, total: 100, items: [...] }
+
+// Or pass URL string
+const result = await fetchList(request.url, MyModel, {
+  tenantValue: shopDomain,
+});
 ```
 
 ### Fetch Single Item
@@ -30,22 +36,26 @@ const result = await fetchList(request.url, MyModel, {
 import { fetchItem } from "mongo-query-toolkit";
 
 // From URL query param (?id=123)
-const item = await fetchItem(request.url, MyModel);
+const item = await fetchItem(request, MyModel);
 
 // Or with explicit ID
-const item = await fetchItem(request.url, MyModel, [], [], "123");
+const item = await fetchItem(request, MyModel, [], [], "123");
 ```
 
 ### Filter Parsing
 
 ```typescript
-import { parseFilter, buildPipeline, getFiltersFromUrl } from "mongo-query-toolkit";
+import {
+  parseFilter,
+  buildPipeline,
+  getFiltersFromUrl,
+} from "mongo-query-toolkit";
 
 // Parse single filter string
 const filter = parseFilter("status|string|eq|active");
 
-// Get filters from URL
-const filters = getFiltersFromUrl(request.url, shopDomain);
+// Get filters from Request or URL
+const filters = getFiltersFromUrl(request, shopDomain);
 
 // Build MongoDB pipeline
 const pipeline = buildPipeline(filters);
@@ -57,7 +67,7 @@ const pipeline = buildPipeline(filters);
 import { fetchUnifiedList } from "mongo-query-toolkit";
 
 const result = await fetchUnifiedList(
-  request.url,
+  request,
   [{ model: BoosterModel }, { model: DealModel }],
   { tenantValue: shopDomain }
 );

@@ -8,9 +8,11 @@ import type {
   FetchListResult,
   FetchOptions,
   MultiModelConfig,
+  RequestInput,
 } from "./types.js";
 import {
   getFiltersFromUrl,
+  getUrlFromRequest,
   buildPipeline,
   buildPipelineWithPercent,
 } from "./filter.js";
@@ -26,19 +28,20 @@ const { ObjectId } = mongoose.Types;
  *
  * @example
  * ```ts
- * const result = await fetchList(request.url, MyModel, {
+ * const result = await fetchList(request, MyModel, {
  *   tenantValue: shopDomain,
  *   limit: 50,
  * });
  * ```
  */
 export async function fetchList<T = Record<string, unknown>>(
-  url: string,
+  request: RequestInput,
   model: Model<unknown>,
   options: FetchOptions = {},
   initialPipeline: PipelineStage[] = [],
   finalPipeline: PipelineStage[] = []
 ): Promise<FetchListResult<T>> {
+  const url = getUrlFromRequest(request);
   const { searchParams } = new URL(url);
   const {
     limit: maxLimit = 250,
@@ -117,12 +120,13 @@ export async function fetchList<T = Record<string, unknown>>(
  * Fetch from multiple models using $unionWith
  */
 export async function fetchUnifiedList<T = Record<string, unknown>>(
-  url: string,
+  request: RequestInput,
   models: MultiModelConfig[],
   options: FetchOptions = {}
 ): Promise<FetchListResult<T>> {
   if (!models.length) return { page: 1, total: 0, items: [] };
 
+  const url = getUrlFromRequest(request);
   const { searchParams } = new URL(url);
   const {
     limit: maxLimit = 250,
@@ -209,13 +213,13 @@ export async function fetchUnifiedList<T = Record<string, unknown>>(
  *
  * @example
  * ```ts
- * const item = await fetchItem(request.url, MyModel);
+ * const item = await fetchItem(request, MyModel);
  * // or with explicit ID
- * const item = await fetchItem(request.url, MyModel, [], [], "123");
+ * const item = await fetchItem(request, MyModel, [], [], "123");
  * ```
  */
 export async function fetchItem<T = Record<string, unknown>>(
-  url: string,
+  request: RequestInput,
   model: Model<unknown>,
   initialPipeline: PipelineStage[] = [],
   finalPipeline: PipelineStage[] = [],
@@ -223,6 +227,7 @@ export async function fetchItem<T = Record<string, unknown>>(
 ): Promise<T | null> {
   // Get ID from URL or param
   if (!id) {
+    const url = getUrlFromRequest(request);
     const { searchParams } = new URL(url);
     id = searchParams.get("id") ?? undefined;
   }

@@ -4,9 +4,25 @@
 
 import type { PipelineStage, Model } from "mongoose";
 import mongoose from "mongoose";
-import type { FilterValue, FilterType, BetweenOperatorValue } from "./types.js";
+import type {
+  FilterValue,
+  FilterType,
+  BetweenOperatorValue,
+  RequestInput,
+} from "./types.js";
 
 const { ObjectId } = mongoose.Types;
+
+// ============================================================================
+// Helper
+// ============================================================================
+
+/**
+ * Extract URL string from Request or string
+ */
+export function getUrlFromRequest(input: RequestInput): string {
+  return typeof input === "string" ? input : input.url;
+}
 
 // ============================================================================
 // Constants
@@ -317,13 +333,14 @@ export async function buildPipelineWithPercent(
 }
 
 /**
- * Extract filter strings from URL
+ * Extract filter strings from Request or URL
  */
 export function getFiltersFromUrl(
-  url: string,
+  request: RequestInput,
   tenantValue?: string,
   tenantField = "shopDomain"
 ): FilterValue[] {
+  const url = getUrlFromRequest(request);
   const { searchParams } = new URL(url);
   const filterStrings = searchParams
     .getAll("filter")
