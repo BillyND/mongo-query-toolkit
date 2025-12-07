@@ -14,6 +14,7 @@ A simple, URL-based MongoDB query toolkit for Node.js. Parse filters from URL qu
 - [Pipeline Customization](#pipeline-customization)
 - [Client-Side Usage](#client-side-usage)
 - [Response Format](#response-format)
+- [Changelog](#changelog)
 
 ---
 
@@ -637,6 +638,12 @@ const result = await fetchList<Product>(request, ProductModel);
 const item = await fetchItem<Product>(request, ProductModel);
 // item is Product | null
 ```
+
+---
+
+## Changelog
+
+See [GitHub Releases](https://github.com/BillyND/mongo-query-toolkit/releases) for version history and release notes.
 
 ---
 
