@@ -6,7 +6,7 @@
  *
  * @example Server-Side (Remix, Next.js, Express)
  * ```ts
- * import { fetchList, fetchItem } from "mongoose-url-query";
+ * import { fetchList, fetchItem } from "@billynd/mongoose-url-query";
  *
  * // Fetch list with pagination & filtering
  * const result = await fetchList(request, MyModel, { limit: 50 });
@@ -17,7 +17,7 @@
  *
  * @example Client-Side (React, Vue, etc.)
  * ```ts
- * import { buildQueryUrl } from "mongoose-url-query";
+ * import { buildQueryUrl } from "@billynd/mongoose-url-query";
  *
  * // Build URL with filters
  * const url = buildQueryUrl("/api/products", {
