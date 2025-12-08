@@ -227,20 +227,50 @@ function buildMatch(filter: FilterValue): PipelineStage | null {
           },
         };
       }
+
       if (type === "string") {
-        if (field === "id" || field === "_id") {
-          const conditions: Record<string, unknown>[] = [{ id: v }];
-          const numVal = Number(v);
+        const isIdField =
+          field === "id" ||
+          field === "_id" ||
+          field.toLowerCase().endsWith("id");
+
+        if (isIdField) {
+          const strVal = v as string;
+          const conditions: Record<string, unknown>[] = [{ [field]: v }];
+          if (field !== "id") conditions[0].id = v;
+
+          const numVal = Number(strVal);
           if (!Number.isNaN(numVal)) {
-            conditions.push({ id: numVal });
+            conditions.push({ id: numVal }, { [field]: numVal });
           }
-          if (isValidObjectId(v as string)) {
-            conditions.push({ _id: new ObjectId(v as string) });
+
+          if (isValidObjectId(strVal)) {
+            const oid = new ObjectId(strVal);
+            conditions.push({ _id: oid }, { [field]: oid });
           }
+
           return { $match: { $or: conditions } };
         }
+
         return { $match: { [field]: { $regex: new RegExp(`^${v}$`, "i") } } };
       }
+
+      if (isValidObjectId(v as string)) {
+        const strVal = v as string;
+
+        return {
+          $match: {
+            $or: [
+              { [field]: v },
+              { [field]: strVal },
+              { [field]: new ObjectId(strVal) },
+              { id: new ObjectId(strVal) },
+              { _id: new ObjectId(strVal) },
+            ],
+          },
+        };
+      }
+
       return { $match: { [field]: v } };
 
     case "ne":
@@ -259,7 +289,9 @@ function buildMatch(filter: FilterValue): PipelineStage | null {
       if (type === "array") {
         const strVal = v as string;
         const parts = strVal.split(",");
-        const vals: (string | mongoose.Types.ObjectId)[] = new Array(parts.length);
+        const vals: (string | mongoose.Types.ObjectId)[] = new Array(
+          parts.length
+        );
         for (let i = 0; i < parts.length; i++) {
           const x = parts[i];
           vals[i] = isValidObjectId(x) ? new ObjectId(x) : x;
@@ -269,7 +301,10 @@ function buildMatch(filter: FilterValue): PipelineStage | null {
       return {
         $match: {
           [field]: {
-            $regex: new RegExp(`^(${(v as string).split(",").join("|")})$`, "i"),
+            $regex: new RegExp(
+              `^(${(v as string).split(",").join("|")})$`,
+              "i"
+            ),
           },
         },
       };
@@ -278,7 +313,9 @@ function buildMatch(filter: FilterValue): PipelineStage | null {
       if (type === "array") {
         const strVal = v as string;
         const parts = strVal.split(",");
-        const vals: (string | mongoose.Types.ObjectId)[] = new Array(parts.length);
+        const vals: (string | mongoose.Types.ObjectId)[] = new Array(
+          parts.length
+        );
         for (let i = 0; i < parts.length; i++) {
           const x = parts[i];
           vals[i] = isValidObjectId(x) ? new ObjectId(x) : x;
