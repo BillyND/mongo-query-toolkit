@@ -1,6 +1,6 @@
 {
   "name": "@billynd/mongoose-url-query",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "description": "URL-based Mongoose query toolkit with filtering, pagination and aggregation",
   "author": "Peakify",
   "license": "MIT",
